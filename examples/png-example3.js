@@ -1,6 +1,5 @@
 var fs  = require('fs');
-var sys = require('sys');
-var Png = require('../png').Png;
+var Png = require('../build/Release/png').Png;
 var Buffer = require('buffer').Buffer;
 
 var WIDTH = 400, HEIGHT = 300;

@@ -9,8 +9,8 @@
                 "src/fixed_png_stack.cpp",
                 "src/dynamic_png_stack.cpp",
                 "src/module.cpp",
-                "src/buffer_compat.cpp",
             ],
+            "include_dirs" : ["<!(node -p -e \"require('path').dirname(require.resolve('nan'))\")"],
             "conditions" : [
                 [
                     'OS=="linux"', {

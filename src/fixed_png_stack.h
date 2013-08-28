@@ -19,13 +19,26 @@ public:
     FixedPngStack(int wwidth, int hheight, buffer_type bbuf_type);
     ~FixedPngStack();
 
+    class FixedPngEncodeWorker : public PngEncoder::EncodeWorker {
+    public:
+        FixedPngEncodeWorker(NanCallback *callback, FixedPngStack *png) : PngEncoder::EncodeWorker(callback), png_obj(png) {
+        };
+
+        void Execute();
+        void HandleOKCallback();
+        void HandleErrorCallback();
+
+    private:
+        FixedPngStack *png_obj;
+    };
+
     void Push(unsigned char *buf_data, int x, int y, int w, int h);
     v8::Handle<v8::Value> PngEncodeSync();
 
-    static v8::Handle<v8::Value> New(const v8::Arguments &args);
-    static v8::Handle<v8::Value> Push(const v8::Arguments &args);
-    static v8::Handle<v8::Value> PngEncodeSync(const v8::Arguments &args);
-    static v8::Handle<v8::Value> PngEncodeAsync(const v8::Arguments &args);
+    static NAN_METHOD(New);
+    static NAN_METHOD(Push);
+    static NAN_METHOD(PngEncodeSync);
+    static NAN_METHOD(PngEncodeAsync);
 };
 #endif
 

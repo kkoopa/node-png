@@ -3,7 +3,6 @@
 #include "common.h"
 #include "png_encoder.h"
 #include "png.h"
-#include "buffer_compat.h"
 
 using namespace v8;
 using namespace node;
@@ -11,7 +10,7 @@ using namespace node;
 void
 Png::Initialize(Handle<Object> target)
 {
-    HandleScope scope;
+    NanScope();
 
     Local<FunctionTemplate> t = FunctionTemplate::New(New);
     t->InstanceTemplate()->SetInternalFieldCount(1);
@@ -26,52 +25,51 @@ Png::Png(int wwidth, int hheight, buffer_type bbuf_type) :
 Handle<Value>
 Png::PngEncodeSync()
 {
-    HandleScope scope;
+    NanScope();
 
-    Local<Value> buf_val = handle_->GetHiddenValue(String::New("buffer"));
+    Local<Value> buf_val = NanObjectWrapHandle(this)->GetHiddenValue(String::New("buffer"));
 
-    char *buf_data = BufferData(buf_val->ToObject());
+    char *buf_data = Buffer::Data(buf_val->ToObject());
 
     try {
         PngEncoder encoder((unsigned char*)buf_data, width, height, buf_type);
         encoder.encode();
         int png_len = encoder.get_png_len();
-        Buffer *retbuf = Buffer::New(png_len);
-        memcpy(BufferData(retbuf), encoder.get_png(), png_len);
-        return scope.Close(retbuf->handle_);
+        Local<Object> retbuf = NanNewBufferHandle(png_len);
+        memcpy(Buffer::Data(retbuf), encoder.get_png(), png_len);
+        return scope.Close(retbuf);
     }
     catch (const char *err) {
-        return VException(err);
+        return ThrowException(Exception::Error(String::New(err)));
     }
 }
 
-Handle<Value>
-Png::New(const Arguments &args)
+NAN_METHOD(Png::New)
 {
-    HandleScope scope;
+    NanScope();
 
     if (args.Length() < 3)
-        return VException("At least three arguments required - data buffer, width, height, [and input buffer type]");
+        return NanThrowError("At least three arguments required - data buffer, width, height, [and input buffer type]");
     if (!Buffer::HasInstance(args[0]))
-        return VException("First argument must be Buffer.");
+        return NanThrowTypeError("First argument must be Buffer.");
     if (!args[1]->IsInt32())
-        return VException("Second argument must be integer width.");
+        return NanThrowTypeError("Second argument must be integer width.");
     if (!args[2]->IsInt32())
-        return VException("Third argument must be integer height.");
+        return NanThrowTypeError("Third argument must be integer height.");
 
     buffer_type buf_type = BUF_RGB;
     if (args.Length() == 4) {
         if (!args[3]->IsString())
-            return VException("Fourth argument must be 'gray', 'rgb', 'bgr', 'rgba' or 'bgra'.");
+            return NanThrowTypeError("Fourth argument must be 'gray', 'rgb', 'bgr', 'rgba' or 'bgra'.");
 
         String::AsciiValue bts(args[3]->ToString());
         if (!(str_eq(*bts, "rgb") || str_eq(*bts, "bgr") ||
             str_eq(*bts, "rgba") || str_eq(*bts, "bgra") ||
             str_eq(*bts, "gray")))
         {
-            return VException("Fourth argument must be 'gray', 'rgb', 'bgr', 'rgba' or 'bgra'.");
+            return NanThrowTypeError("Fourth argument must be 'gray', 'rgb', 'bgr', 'rgba' or 'bgra'.");
         }
-        
+
         if (str_eq(*bts, "rgb"))
             buf_type = BUF_RGB;
         else if (str_eq(*bts, "bgr"))
@@ -83,133 +81,110 @@ Png::New(const Arguments &args)
         else if (str_eq(*bts, "gray"))
             buf_type = BUF_GRAY;
         else
-            return VException("Fourth argument wasn't 'gray', 'rgb', 'bgr', 'rgba' or 'bgra'.");
+            return NanThrowTypeError("Fourth argument wasn't 'gray', 'rgb', 'bgr', 'rgba' or 'bgra'.");
     }
-
 
     int w = args[1]->Int32Value();
     int h = args[2]->Int32Value();
 
     if (w < 0)
-        return VException("Width smaller than 0.");
+        return NanThrowRangeError("Width smaller than 0.");
     if (h < 0)
-        return VException("Height smaller than 0.");
+        return NanThrowRangeError("Height smaller than 0.");
 
     Png *png = new Png(w, h, buf_type);
     png->Wrap(args.This());
 
     // Save buffer.
-    png->handle_->SetHiddenValue(String::New("buffer"), args[0]);
+    NanObjectWrapHandle(png)->SetHiddenValue(String::New("buffer"), args[0]);
 
-    return args.This();
+    NanReturnValue(args.This());
 }
 
-Handle<Value>
-Png::PngEncodeSync(const Arguments &args)
+NAN_METHOD(Png::PngEncodeSync)
 {
-    HandleScope scope;
+    NanScope();
     Png *png = ObjectWrap::Unwrap<Png>(args.This());
-    return scope.Close(png->PngEncodeSync());
+    NanReturnValue(png->PngEncodeSync());
 }
 
-void
-Png::UV_PngEncode(uv_work_t* req)
-{
-    encode_request *enc_req = (encode_request *)req->data;
-    Png *png = (Png *)enc_req->png_obj;
-
+void Png::PngEncodeWorker::Execute() {
     try {
-        PngEncoder encoder((unsigned char *)enc_req->buf_data, png->width, png->height, png->buf_type);
+        PngEncoder encoder((unsigned char *)buf_data, png_obj->width, png_obj->height, png_obj->buf_type);
         encoder.encode();
-        enc_req->png_len = encoder.get_png_len();
-        enc_req->png = (char *)malloc(sizeof(*enc_req->png)*enc_req->png_len);
-        if (!enc_req->png) {
-            enc_req->error = strdup("malloc in Png::UV_PngEncode failed.");
-            return;
-        }
-        else {
-            memcpy(enc_req->png, encoder.get_png(), enc_req->png_len);
+        png_len = encoder.get_png_len();
+        png = (char *)malloc(sizeof(*png)*png_len);
+        if (!png) {
+            errmsg = strdup("malloc in Png::UV_PngEncode failed.");
+        } else {
+            memcpy(png, encoder.get_png(), png_len);
         }
     }
     catch (const char *err) {
-        enc_req->error = strdup(err);
+        errmsg = strdup(err);
     }
 }
 
-void 
-Png::UV_PngEncodeAfter(uv_work_t *req)
-{
-    HandleScope scope;
+void Png::PngEncodeWorker::HandleOKCallback() {
+    NanScope();
 
-    encode_request *enc_req = (encode_request *)req->data;
-    delete req;
-
-    Handle<Value> argv[2];
-
-    if (enc_req->error) {
-        argv[0] = Undefined();
-        argv[1] = ErrorException(enc_req->error);
-    }
-    else {
-        Buffer *buf = Buffer::New(enc_req->png_len);
-        memcpy(BufferData(buf), enc_req->png, enc_req->png_len);
-        argv[0] = buf->handle_;
-        argv[1] = Undefined();
-    }
+    Local<Object> buf = NanNewBufferHandle(png_len);
+    memcpy(Buffer::Data(buf), png, png_len);
+    Local<Value> argv[2] = {buf, Undefined()};
 
     TryCatch try_catch; // don't quite see the necessity of this
 
-    enc_req->callback->Call(Context::GetCurrent()->Global(), 2, argv);
+    callback->Call(2, argv);
 
     if (try_catch.HasCaught())
         FatalException(try_catch);
 
-    enc_req->callback.Dispose();
-    free(enc_req->png);
-    free(enc_req->error);
+    free(png);
+    png = NULL;
 
-    ((Png *)enc_req->png_obj)->Unref();
-    free(enc_req);
+    png_obj->Unref();
 }
 
-Handle<Value>
-Png::PngEncodeAsync(const Arguments &args)
+void Png::PngEncodeWorker::HandleErrorCallback() {
+    NanScope();
+
+    Local<Value> argv[2] = {Undefined(), Exception::Error(String::New(errmsg))};
+
+    TryCatch try_catch; // don't quite see the necessity of this
+
+    callback->Call(2, argv);
+
+    if (try_catch.HasCaught())
+        FatalException(try_catch);
+
+    if (png) {
+        free(png);
+        png = NULL;
+    }
+
+    png_obj->Unref();
+}
+
+NAN_METHOD(Png::PngEncodeAsync)
 {
-    HandleScope scope;
+    NanScope();
 
     if (args.Length() != 1)
-        return VException("One argument required - callback function.");
+        return NanThrowError("One argument required - callback function.");
 
     if (!args[0]->IsFunction())
-        return VException("First argument must be a function.");
+        return NanThrowTypeError("First argument must be a function.");
 
     Local<Function> callback = Local<Function>::Cast(args[0]);
     Png *png = ObjectWrap::Unwrap<Png>(args.This());
 
-    encode_request *enc_req = (encode_request *)malloc(sizeof(*enc_req));
-    if (!enc_req)
-        return VException("malloc in Png::PngEncodeAsync failed.");
-
-    enc_req->callback = Persistent<Function>::New(callback);
-    enc_req->png_obj = png;
-    enc_req->png = NULL;
-    enc_req->png_len = 0;
-    enc_req->error = NULL;
-
     // We need to pull out the buffer data before
     // we go to the thread pool.
-    Local<Value> buf_val = png->handle_->GetHiddenValue(String::New("buffer"));
+    Local<Value> buf_val = NanObjectWrapHandle(png)->GetHiddenValue(String::New("buffer"));
 
-    enc_req->buf_data = BufferData(buf_val->ToObject());
-
-
-    uv_work_t* req = new uv_work_t;
-    req->data = enc_req;
-    uv_queue_work(uv_default_loop(), req, UV_PngEncode, (uv_after_work_cb)UV_PngEncodeAfter);
+    NanAsyncQueueWorker(new Png::PngEncodeWorker(new NanCallback(callback), png, Buffer::Data(buf_val->ToObject())));
 
     png->Ref();
 
-    return Undefined();
+    NanReturnUndefined();
 }
-
-NODE_MODULE(png, Png::Initialize)

@@ -1,6 +1,5 @@
 var fs  = require('fs');
-var sys = require('sys');
-var Png = require('png').Png;
+var Png = require('../build/Release/png').Png;
 var Buffer = require('buffer').Buffer;
 
 // the rgba-terminal.dat file is 1152000 bytes long.

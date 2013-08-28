@@ -118,4 +118,3 @@ int
 PngEncoder::get_png_len() const {
     return png_len;
 }
-

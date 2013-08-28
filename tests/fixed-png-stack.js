@@ -1,6 +1,5 @@
-var PngLib = require('png');
+var PngLib = require('../build/Release/png');
 var fs = require('fs');
-var sys = require('sys');
 var Buffer = require('buffer').Buffer;
 
 var pngStack = new PngLib.FixedPngStack(720, 400, 'rgba');

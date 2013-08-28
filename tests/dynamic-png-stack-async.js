@@ -1,6 +1,5 @@
-var PngLib = require('png');
+var PngLib = require('../build/Release/png');
 var fs = require('fs');
-var sys = require('sys');
 var Buffer = require('buffer').Buffer;
 
 var pngStack = new PngLib.DynamicPngStack('rgba');
@@ -24,7 +23,7 @@ files.forEach(function(file) {
 pngStack.encode(function (data, dims, error) {
     fs.writeFileSync('dynamic-async.png', data.toString('binary'), 'binary');
 
-    sys.log("PNG located at (" + dims.x + "," + dims.y + ") with width " +
+    console.log("PNG located at (" + dims.x + "," + dims.y + ") with width " +
         dims.width + " and height " + dims.height);
 });
 

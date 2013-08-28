@@ -1,6 +1,5 @@
 #include "png_encoder.h"
 #include "dynamic_png_stack.h"
-#include "buffer_compat.h"
 
 using namespace v8;
 using namespace node;
@@ -20,11 +19,6 @@ DynamicPngStack::optimal_dimension()
         if (bottom.y == -1 || png->y + png->h > bottom.y)
             bottom.y = png->y + png->h;
     }
-
-    /*
-    printf("top    x, y: %d, %d\n", top.x, top.y);
-    printf("bottom x, y: %d, %d\n", bottom.x, bottom.y);
-    */
 
     return std::make_pair(top, bottom);
 }
@@ -51,7 +45,7 @@ DynamicPngStack::construct_png_data(unsigned char *data, Point &top)
 void
 DynamicPngStack::Initialize(Handle<Object> target)
 {
-    HandleScope scope;
+    NanScope();
 
     Local<FunctionTemplate> t = FunctionTemplate::New(New);
     t->InstanceTemplate()->SetInternalFieldCount(1);
@@ -74,32 +68,32 @@ DynamicPngStack::~DynamicPngStack()
 Handle<Value>
 DynamicPngStack::Push(unsigned char *buf_data, size_t buf_len, int x, int y, int w, int h)
 {
+    NanScope();
+
     try {
         Png *png = new Png(buf_data, buf_len, x, y, w, h);
         png_stack.push_back(png);
-        return Undefined();
+        return scope.Close(Undefined());
     }
     catch (const char *e) {
-        return VException(e);
+        return ThrowException(Exception::Error(String::New(e)));
     }
 }
 
 Handle<Value>
 DynamicPngStack::PngEncodeSync()
 {
-    HandleScope scope;
+    NanScope();
 
     std::pair<Point, Point> optimal = optimal_dimension();
     Point top = optimal.first, bot = optimal.second;
-
-    // printf("width, height: %d, %d\n", bot.x - top.x, bot.y - top.y);
 
     offset = top;
     width = bot.x - top.x;
     height = bot.y - top.y;
 
     unsigned char *data = (unsigned char*)malloc(sizeof(*data) * width * height * 4);
-    if (!data) return VException("malloc failed in DynamicPngStack::PngEncode");
+    if (!data) return ThrowException(Exception::Error(String::New("malloc failed in DynamicPngStack::PngEncode")));
     memset(data, 0xFF, width*height*4);
 
     construct_png_data(data, top);
@@ -111,19 +105,19 @@ DynamicPngStack::PngEncodeSync()
         encoder.encode();
         free(data);
         int png_len = encoder.get_png_len();
-        Buffer *retbuf = Buffer::New(png_len);
-        memcpy(BufferData(retbuf), encoder.get_png(), png_len);
-        return scope.Close(retbuf->handle_);
+        Local<Object> retbuf = NanNewBufferHandle(png_len);
+        memcpy(Buffer::Data(retbuf), encoder.get_png(), png_len);
+        return scope.Close(retbuf);
     }
     catch (const char *err) {
-        return VException(err);
+        return ThrowException(Exception::Error(String::New(err)));
     }
 }
 
 Handle<Value>
 DynamicPngStack::Dimensions()
 {
-    HandleScope scope;
+    NanScope();
 
     Local<Object> dim = Object::New();
     dim->Set(String::NewSymbol("x"), Integer::New(offset.x));
@@ -134,23 +128,22 @@ DynamicPngStack::Dimensions()
     return scope.Close(dim);
 }
 
-Handle<Value>
-DynamicPngStack::New(const Arguments &args)
+NAN_METHOD(DynamicPngStack::New)
 {
-    HandleScope scope;
+    NanScope();
 
     buffer_type buf_type = BUF_RGB;
     if (args.Length() == 1) {
         if (!args[0]->IsString())
-            return VException("First argument must be 'rgb', 'bgr', 'rgba' or 'bgra'.");
+            return NanThrowTypeError("First argument must be 'rgb', 'bgr', 'rgba' or 'bgra'.");
 
         String::AsciiValue bts(args[0]->ToString());
         if (!(str_eq(*bts, "rgb") || str_eq(*bts, "bgr") ||
             str_eq(*bts, "rgba") || str_eq(*bts, "bgra")))
         {
-            return VException("First argument must be 'rgb', 'bgr', 'rgba' or 'bgra'.");
+            return NanThrowTypeError("First argument must be 'rgb', 'bgr', 'rgba' or 'bgra'.");
         }
-        
+
         if (str_eq(*bts, "rgb"))
             buf_type = BUF_RGB;
         else if (str_eq(*bts, "bgr"))
@@ -160,29 +153,28 @@ DynamicPngStack::New(const Arguments &args)
         else if (str_eq(*bts, "bgra"))
             buf_type = BUF_BGRA;
         else
-            return VException("First argument wasn't 'rgb', 'bgr', 'rgba' or 'bgra'.");
+            return NanThrowTypeError("First argument wasn't 'rgb', 'bgr', 'rgba' or 'bgra'.");
     }
 
     DynamicPngStack *png_stack = new DynamicPngStack(buf_type);
     png_stack->Wrap(args.This());
-    return args.This();
+    NanReturnValue(args.This());
 }
 
-Handle<Value>
-DynamicPngStack::Push(const Arguments &args)
+NAN_METHOD(DynamicPngStack::Push)
 {
-    HandleScope scope;
+    NanScope();
 
     if (!Buffer::HasInstance(args[0]))
-        return VException("First argument must be Buffer.");
+        return NanThrowTypeError("First argument must be Buffer.");
     if (!args[1]->IsInt32())
-        return VException("Second argument must be integer x.");
+        return NanThrowTypeError("Second argument must be integer x.");
     if (!args[2]->IsInt32())
-        return VException("Third argument must be integer y.");
+        return NanThrowTypeError("Third argument must be integer y.");
     if (!args[3]->IsInt32())
-        return VException("Fourth argument must be integer w.");
+        return NanThrowTypeError("Fourth argument must be integer w.");
     if (!args[4]->IsInt32())
-        return VException("Fifth argument must be integer h.");
+        return NanThrowTypeError("Fifth argument must be integer h.");
 
     int x = args[1]->Int32Value();
     int y = args[2]->Int32Value();
@@ -190,158 +182,137 @@ DynamicPngStack::Push(const Arguments &args)
     int h = args[4]->Int32Value();
 
     if (x < 0)
-        return VException("Coordinate x smaller than 0.");
+        return NanThrowRangeError("Coordinate x smaller than 0.");
     if (y < 0)
-        return VException("Coordinate y smaller than 0.");
+        return NanThrowRangeError("Coordinate y smaller than 0.");
     if (w < 0)
-        return VException("Width smaller than 0.");
+        return NanThrowRangeError("Width smaller than 0.");
     if (h < 0)
-        return VException("Height smaller than 0.");
+        return NanThrowRangeError("Height smaller than 0.");
 
     DynamicPngStack *png_stack = ObjectWrap::Unwrap<DynamicPngStack>(args.This());
 
-    Local<Object> buf_obj = args[0]->ToObject();
-    char *buf_data = BufferData(buf_obj);
-    size_t buf_len = BufferLength(buf_obj);
+    Local<Object> buf_obj = args[0].As<Object>();
+    char *buf_data = Buffer::Data(buf_obj);
+    size_t buf_len = Buffer::Length(buf_obj);
 
-    return scope.Close(png_stack->Push((unsigned char*)buf_data, buf_len, x, y, w, h));
+    NanReturnValue(png_stack->Push((unsigned char*)buf_data, buf_len, x, y, w, h));
 }
 
-Handle<Value>
-DynamicPngStack::Dimensions(const Arguments &args)
+NAN_METHOD(DynamicPngStack::Dimensions)
 {
-    HandleScope scope;
+    NanScope();
 
     DynamicPngStack *png_stack = ObjectWrap::Unwrap<DynamicPngStack>(args.This());
-    return scope.Close(png_stack->Dimensions());
+    NanReturnValue(png_stack->Dimensions());
 }
 
-Handle<Value>
-DynamicPngStack::PngEncodeSync(const Arguments &args)
+NAN_METHOD(DynamicPngStack::PngEncodeSync)
 {
-    HandleScope scope;
+    NanScope();
 
     DynamicPngStack *png_stack = ObjectWrap::Unwrap<DynamicPngStack>(args.This());
-    return scope.Close(png_stack->PngEncodeSync());
+    NanReturnValue(png_stack->PngEncodeSync());
 }
 
-void
-DynamicPngStack::UV_PngEncode(uv_work_t *req)
-{
-    encode_request *enc_req = (encode_request *)req->data;
-    DynamicPngStack *png = (DynamicPngStack *)enc_req->png_obj;
-
-    std::pair<Point, Point> optimal = png->optimal_dimension();
+void DynamicPngStack::DynamicPngEncodeWorker::Execute() {
+    std::pair<Point, Point> optimal = png_obj->optimal_dimension();
     Point top = optimal.first, bot = optimal.second;
 
-    // printf("width, height: %d, %d\n", bot.x - top.x, bot.y - top.y);
+    png_obj->offset = top;
+    png_obj->width = bot.x - top.x;
+    png_obj->height = bot.y - top.y;
 
-    png->offset = top;
-    png->width = bot.x - top.x;
-    png->height = bot.y - top.y;
-
-    unsigned char *data = (unsigned char*)malloc(sizeof(*data) * png->width * png->height * 4);
+    unsigned char *data = (unsigned char*)malloc(sizeof(*data) * png_obj->width * png_obj->height * 4);
     if (!data) {
-        enc_req->error = strdup("malloc failed in DynamicPngStack::UV_PngEncode.");
+        errmsg = strdup("malloc failed in DynamicPngStack::UV_PngEncode.");
         return;
     }
-    memset(data, 0xFF, png->width*png->height*4);
 
-    png->construct_png_data(data, top);
+    memset(data, 0xFF, png_obj->width*png_obj->height*4);
 
-    buffer_type pbt = (png->buf_type == BUF_BGR || png->buf_type == BUF_BGRA) ?
+    png_obj->construct_png_data(data, top);
+
+    buffer_type pbt = (png_obj->buf_type == BUF_BGR || png_obj->buf_type == BUF_BGRA) ?
         BUF_BGRA : BUF_RGBA;
 
     try {
-        PngEncoder encoder(data, png->width, png->height, pbt);
+        PngEncoder encoder(data, png_obj->width, png_obj->height, pbt);
         encoder.encode();
         free(data);
-        enc_req->png_len = encoder.get_png_len();
-        enc_req->png = (char *)malloc(sizeof(*enc_req->png)*enc_req->png_len);
-        if (!enc_req->png) {
-            enc_req->error = strdup("malloc in DynamicPngStack::UV_PngEncode failed.");
+        png_len = encoder.get_png_len();
+        png = (char *)malloc(sizeof(*png)*png_len);
+        if (!png) {
+            errmsg = strdup("malloc in DynamicPngStack::DynamicPngEncodeWorker::Execute() failed.");
             return;
         }
         else {
-            memcpy(enc_req->png, encoder.get_png(), enc_req->png_len);
+            memcpy(png, encoder.get_png(), png_len);
         }
     }
     catch (const char *err) {
-        enc_req->error = strdup(err);
+        if (data) free(data);
+        errmsg = strdup(err);
     }
 }
 
-void 
-DynamicPngStack::UV_PngEncodeAfter(uv_work_t *req)
-{
-    HandleScope scope;
+void DynamicPngStack::DynamicPngEncodeWorker::HandleOKCallback() {
+    NanScope();
 
-    encode_request *enc_req = (encode_request *)req->data;
-    delete req;
-
-    DynamicPngStack *png = (DynamicPngStack *)enc_req->png_obj;
-
-    Handle<Value> argv[3];
-
-    if (enc_req->error) {
-        argv[0] = Undefined();
-        argv[1] = Undefined();
-        argv[2] = ErrorException(enc_req->error);
-    }
-    else {
-        Buffer *buf = Buffer::New(enc_req->png_len);
-        memcpy(BufferData(buf), enc_req->png, enc_req->png_len);
-        argv[0] = buf->handle_;
-        argv[1] = png->Dimensions();
-        argv[2] = Undefined();
-    }
+    Local<Object> buf = NanNewBufferHandle(png_len);
+    memcpy(Buffer::Data(buf), png, png_len);
+    Local<Value> argv[3] = {buf, png_obj->Dimensions(), Undefined()};
 
     TryCatch try_catch; // don't quite see the necessity of this
 
-    enc_req->callback->Call(Context::GetCurrent()->Global(), 3, argv);
+    callback->Call(3, argv);
 
     if (try_catch.HasCaught())
         FatalException(try_catch);
 
-    enc_req->callback.Dispose();
-    free(enc_req->png);
-    free(enc_req->error);
+    free(png);
+    png = NULL;
 
-    png->Unref();
-    free(enc_req);
+    png_obj->Unref();
 }
 
-Handle<Value>
-DynamicPngStack::PngEncodeAsync(const Arguments &args)
+void DynamicPngStack::DynamicPngEncodeWorker::HandleErrorCallback() {
+    NanScope();
+
+    Local<Value> argv[3] = {Undefined(), Undefined(), Exception::Error(String::New(errmsg))};
+
+    TryCatch try_catch; // don't quite see the necessity of this
+
+    callback->Call(3, argv);
+
+    if (try_catch.HasCaught())
+        FatalException(try_catch);
+
+    if (png) {
+        free(png);
+        png = NULL;
+    }
+
+    png_obj->Unref();
+}
+
+NAN_METHOD(DynamicPngStack::PngEncodeAsync)
 {
-    HandleScope scope;
+    NanScope();
 
     if (args.Length() != 1)
-        return VException("One argument required - callback function.");
+        return NanThrowError("One argument required - callback function.");
 
     if (!args[0]->IsFunction())
-        return VException("First argument must be a function.");
+        return NanThrowTypeError("First argument must be a function.");
 
     Local<Function> callback = Local<Function>::Cast(args[0]);
     DynamicPngStack *png = ObjectWrap::Unwrap<DynamicPngStack>(args.This());
 
-    encode_request *enc_req = (encode_request *)malloc(sizeof(*enc_req));
-    if (!enc_req)
-        return VException("malloc in DynamicPngStack::PngEncodeAsync failed.");
-
-    enc_req->callback = Persistent<Function>::New(callback);
-    enc_req->png_obj = png;
-    enc_req->png = NULL;
-    enc_req->png_len = 0;
-    enc_req->error = NULL;
-
-
-    uv_work_t* req = new uv_work_t;
-    req->data = enc_req;
-    uv_queue_work(uv_default_loop(), req, UV_PngEncode, (uv_after_work_cb)UV_PngEncodeAfter);
+    NanAsyncQueueWorker(new DynamicPngStack::DynamicPngEncodeWorker(new NanCallback(callback), png));
 
     png->Ref();
 
-    return Undefined();
+    NanReturnUndefined();
 }
 

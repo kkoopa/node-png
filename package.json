@@ -23,7 +23,10 @@
    "repository": {
        "type": "git",
        "url": "http://github.com/pkrumins/node-png.git" 
-   }, 
+   },
+   "dependencies": {
+       "nan": "~0.3.1"
+   },
    "directories": {
        "examples": "examples",
        "src": "src"

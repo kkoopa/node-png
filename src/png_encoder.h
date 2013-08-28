@@ -4,6 +4,7 @@
 #include <png.h>
 
 #include "common.h"
+#include "nan.h"
 
 class PngEncoder {
     int width, height;
@@ -15,6 +16,19 @@ class PngEncoder {
 public:
     PngEncoder(unsigned char *ddata, int width, int hheight, buffer_type bbuf_type);
     ~PngEncoder();
+
+    class EncodeWorker : public NanAsyncWorker {
+    public:
+        EncodeWorker(NanCallback *callback, char *buf_data=NULL) : NanAsyncWorker(callback), png(NULL), png_len(0), buf_data(buf_data) {
+              png = NULL;
+              png_len = 0;
+        };
+
+    protected:
+        char *png;
+        int png_len;
+        char *buf_data;
+    };
 
     static void png_chunk_producer(png_structp png_ptr, png_bytep data, png_size_t length);
     void encode();
